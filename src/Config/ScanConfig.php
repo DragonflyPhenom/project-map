@@ -15,9 +15,12 @@ final readonly class ScanConfig
     public function __construct(
         public string $projectPath,
         public string $outputPath,
-        public array $formats = ['json', 'mmd', 'html'],
+        public array $formats = ['json', 'dot', 'svg', 'html'],
         public FrameworkType $framework = FrameworkType::Auto,
-        public array $exclude = ['vendor', 'node_modules', 'storage', 'bootstrap/cache', 'var/cache'],
+        public array $exclude = ['vendor', 'node_modules', 'storage', 'bootstrap/cache', 'var/cache', 'tests'],
+        public string $graph = 'all',
+        public ?int $maxDepth = null,
+        public bool $includeTests = false,
     ) {
     }
 
@@ -31,9 +34,16 @@ final readonly class ScanConfig
         array|string $formats,
         string $framework,
         array|string $exclude,
+        string $graph = 'all',
+        string|int|null $maxDepth = null,
+        bool|string $includeTests = false,
     ): self {
         $formatList = is_array($formats) ? $formats : explode(',', $formats);
         $excludeList = is_array($exclude) ? $exclude : explode(',', $exclude);
+        $includeTests = filter_var($includeTests, FILTER_VALIDATE_BOOLEAN);
+        if (!$includeTests) {
+            $excludeList[] = 'tests';
+        }
 
         return new self(
             realpath($projectPath) ?: $projectPath,
@@ -41,6 +51,9 @@ final readonly class ScanConfig
             array_values(array_filter(array_map('trim', $formatList))),
             FrameworkType::fromInput($framework),
             array_values(array_unique(array_filter(array_map('trim', array_merge(['vendor'], $excludeList))))),
+            in_array($graph, ['classes', 'routes', 'models', 'all'], true) ? $graph : 'all',
+            $maxDepth === null || $maxDepth === '' ? null : max(0, (int) $maxDepth),
+            $includeTests,
         );
     }
 }

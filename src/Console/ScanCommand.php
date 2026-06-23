@@ -9,6 +9,7 @@ use IaroslavKhmel\ProjectMap\Output\DotWriter;
 use IaroslavKhmel\ProjectMap\Output\HtmlWriter;
 use IaroslavKhmel\ProjectMap\Output\JsonWriter;
 use IaroslavKhmel\ProjectMap\Output\MermaidRenderer;
+use IaroslavKhmel\ProjectMap\Output\SvgWriter;
 use IaroslavKhmel\ProjectMap\Scanner\ProjectScanner;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -25,6 +26,7 @@ final class ScanCommand extends Command
         private readonly JsonWriter $jsonWriter = new JsonWriter(),
         private readonly MermaidRenderer $mermaidRenderer = new MermaidRenderer(),
         private readonly DotWriter $dotWriter = new DotWriter(),
+        private readonly SvgWriter $svgWriter = new SvgWriter(),
         private readonly HtmlWriter $htmlWriter = new HtmlWriter(),
     ) {
         parent::__construct();
@@ -36,9 +38,12 @@ final class ScanCommand extends Command
             ->setName('scan')
             ->addOption('path', null, InputOption::VALUE_REQUIRED, 'Project path', '.')
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory', '.project-map')
-            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Comma-separated formats: json,mmd,html,dot', 'json,mmd,html')
+            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Comma-separated formats: json,dot,svg,html,mmd', 'json,dot,svg,html')
             ->addOption('framework', null, InputOption::VALUE_REQUIRED, 'auto, laravel, symfony or generic', 'auto')
-            ->addOption('exclude', null, InputOption::VALUE_REQUIRED, 'Comma-separated excluded directories', 'vendor,node_modules,storage,bootstrap/cache,var/cache');
+            ->addOption('exclude', null, InputOption::VALUE_REQUIRED, 'Comma-separated excluded directories', 'vendor,node_modules,storage,bootstrap/cache,var/cache,tests')
+            ->addOption('graph', null, InputOption::VALUE_REQUIRED, 'Graph scope: classes, routes, models or all', 'all')
+            ->addOption('max-depth', null, InputOption::VALUE_REQUIRED, 'Maximum method call depth from routes')
+            ->addOption('include-tests', null, InputOption::VALUE_REQUIRED, 'Include tests in graph', 'false');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -55,6 +60,9 @@ final class ScanCommand extends Command
             (string) $input->getOption('format'),
             (string) $input->getOption('framework'),
             (string) $input->getOption('exclude'),
+            (string) $input->getOption('graph'),
+            $input->getOption('max-depth'),
+            (string) $input->getOption('include-tests'),
         );
 
         $result = $this->scanner->scan($config);
@@ -70,12 +78,24 @@ final class ScanCommand extends Command
             $written[] = $this->mermaidRenderer->write($result['graph'], $config->outputPath);
         }
 
-        if (in_array('dot', $config->formats, true)) {
-            $written[] = $this->dotWriter->write($result['graph'], $config->outputPath);
+        $dotFile = null;
+        if (in_array('dot', $config->formats, true) || in_array('svg', $config->formats, true) || in_array('html', $config->formats, true)) {
+            $dotFile = $this->dotWriter->write($result['graph'], $config->outputPath, $config->graph, $config->maxDepth);
+            if (in_array('dot', $config->formats, true)) {
+                $written[] = $dotFile;
+            }
+        }
+
+        $svgFile = null;
+        if (in_array('svg', $config->formats, true) && $dotFile !== null) {
+            $svgFile = $this->svgWriter->write($dotFile, $config->outputPath);
+            if ($svgFile !== null) {
+                $written[] = $svgFile;
+            }
         }
 
         if (in_array('html', $config->formats, true)) {
-            $written[] = $this->htmlWriter->write($payload, $config->outputPath, $mermaid);
+            $written[] = $this->htmlWriter->write($payload, $config->outputPath, $mermaid, $svgFile);
         }
 
         $output->writeln('<info>Project map generated.</info>');

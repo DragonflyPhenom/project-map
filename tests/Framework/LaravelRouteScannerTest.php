@@ -54,13 +54,15 @@ PHP);
 
         $routes = (new LaravelRouteScanner())->scan($dir);
 
-        self::assertCount(2, $routes);
+        self::assertCount(6, $routes);
         self::assertSame('/api/v1/users', $routes[0]['uri']);
         self::assertSame(['auth:sanctum'], $routes[0]['middleware']);
         self::assertSame('App\Http\Controllers\Api\UserController::index', $routes[0]['controller_method']);
-        self::assertSame('RESOURCE', $routes[1]['http_method']);
+        self::assertSame('GET', $routes[1]['http_method']);
         self::assertSame('/api/posts', $routes[1]['uri']);
-        self::assertSame('App\Http\Controllers\Api\PostController::apiResource', $routes[1]['controller_method']);
+        self::assertSame('App\Http\Controllers\Api\PostController::index', $routes[1]['controller_method']);
+        self::assertSame('DELETE', $routes[5]['http_method']);
+        self::assertSame('App\Http\Controllers\Api\PostController::destroy', $routes[5]['controller_method']);
     }
 
     public function testItUsesRouteServiceProviderPrefixForRouteFiles(): void

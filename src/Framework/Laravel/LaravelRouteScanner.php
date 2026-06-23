@@ -13,7 +13,7 @@ use PhpParser\ParserFactory;
 
 final class LaravelRouteScanner
 {
-    public const METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'any', 'resource', 'apiResource'];
+    public const METHODS = ['get', 'post', 'put', 'patch', 'delete', 'options', 'any', 'match', 'resource', 'apiResource'];
 
     /**
      * @return list<array<string, mixed>>
@@ -38,10 +38,23 @@ final class LaravelRouteScanner
      */
     public function scanFile(string $file, string $projectPath): array
     {
+        $seen = [];
+
+        return $this->scanFileWithIncludes($file, $projectPath, $seen);
+    }
+
+    /**
+     * @param array<string, true> $seen
+     * @return list<array<string, mixed>>
+     */
+    private function scanFileWithIncludes(string $file, string $projectPath, array &$seen): array
+    {
         $code = file_get_contents($file);
-        if (!is_string($code)) {
+        $realFile = realpath($file) ?: $file;
+        if (!is_string($code) || isset($seen[$realFile])) {
             return [];
         }
+        $seen[$realFile] = true;
 
         try {
             $parser = (new ParserFactory())->createForNewestSupportedVersion();
@@ -56,7 +69,9 @@ final class LaravelRouteScanner
         $visitor = new class($file, $projectPath, $this->serviceProviderPrefix($file, $projectPath)) extends NodeVisitorAbstract {
             /** @var list<array<string, mixed>> */
             public array $routes = [];
-            /** @var list<array{prefix: string, middleware: list<string>, controller: string|null}> */
+            /** @var list<string> */
+            public array $includes = [];
+            /** @var list<array{prefix: string, middleware: list<string>, controller: string|null, name: string}> */
             private array $groups = [];
 
             public function __construct(
@@ -68,13 +83,19 @@ final class LaravelRouteScanner
 
             public function enterNode(Node $node)
             {
+                if ($node instanceof Node\Expr\Include_) {
+                    $include = $this->includePath($node->expr);
+                    if ($include !== null) {
+                        $this->includes[] = $include;
+                    }
+                }
+
                 if ($this->isGroupCall($node)) {
                     $this->groups[] = $this->contextFromChain($node);
                 }
 
                 if ($node instanceof Node\Expr\StaticCall) {
-                    $route = $this->routeFromStaticCall($node);
-                    if ($route !== null) {
+                    foreach ($this->routesFromStaticCall($node) as $route) {
                         $this->routes[] = $route;
                     }
                 }
@@ -92,43 +113,43 @@ final class LaravelRouteScanner
             }
 
             /**
-             * @return array<string, mixed>|null
+             * @return list<array<string, mixed>>
              */
-            private function routeFromStaticCall(Node\Expr\StaticCall $node): ?array
+            private function routesFromStaticCall(Node\Expr\StaticCall $node): array
             {
                 if (!$node->name instanceof Node\Identifier || !$node->class instanceof Node\Name || !str_ends_with($node->class->toString(), 'Route')) {
-                    return null;
+                    return [];
                 }
 
                 $method = $node->name->toString();
                 if (!in_array($method, LaravelRouteScanner::METHODS, true)) {
-                    return null;
+                    return [];
                 }
 
                 $context = $this->currentContext();
-                $uri = $this->stringValue($node->args[0]->value ?? null) ?? '';
-                $action = $node->args[1]->value ?? null;
-                $controller = null;
-                $controllerMethod = null;
+                $uriIndex = $method === 'match' ? 1 : 0;
+                $actionIndex = $method === 'match' ? 2 : 1;
+                $uri = $this->stringValue($node->args[$uriIndex]->value ?? null) ?? '';
+                $action = $node->args[$actionIndex]->value ?? null;
 
                 if ($method === 'resource' || $method === 'apiResource') {
                     $controller = $this->classValue($action);
-                    $controllerMethod = $controller ? $controller . '::' . $method : null;
-                } else {
-                    [$controller, $controllerMethod] = $this->controllerAction($action, $context['controller']);
+
+                    return $this->resourceRoutes($context, $uri, $controller, $method === 'apiResource');
                 }
 
+                [$controller, $controllerMethod] = $this->controllerAction($action, $context['controller']);
                 $uri = $this->joinUri($context['prefix'], $uri);
 
-                return [
+                return [[
                     'http_method' => $this->httpMethod($method),
                     'uri' => $uri,
-                    'name' => null,
+                    'name' => $context['name'],
                     'middleware' => $context['middleware'],
                     'controller' => $controller,
                     'controller_method' => $controllerMethod,
                     'source_file' => PathNormalizer::relative($this->file, $this->projectPath),
-                ];
+                ]];
             }
 
             /**
@@ -155,6 +176,11 @@ final class LaravelRouteScanner
                     }
                 }
 
+                $controller = $this->classValue($action);
+                if ($controller !== null) {
+                    return [$controller, $controller . '::__invoke'];
+                }
+
                 return [$groupController, null];
             }
 
@@ -168,11 +194,11 @@ final class LaravelRouteScanner
             }
 
             /**
-             * @return array{prefix: string, middleware: list<string>, controller: string|null}
+             * @return array{prefix: string, middleware: list<string>, controller: string|null, name: string}
              */
             private function contextFromChain(Node\Expr\MethodCall|Node\Expr\StaticCall $node): array
             {
-                $context = ['prefix' => '', 'middleware' => [], 'controller' => null];
+                $context = ['prefix' => '', 'middleware' => [], 'controller' => null, 'name' => ''];
                 $cursor = $node;
                 while ($cursor instanceof Node\Expr\MethodCall || $cursor instanceof Node\Expr\StaticCall) {
                     if ($cursor->name instanceof Node\Identifier) {
@@ -183,6 +209,8 @@ final class LaravelRouteScanner
                             $context['middleware'] = array_values(array_merge($this->middlewareValues($cursor->args[0]->value ?? null), $context['middleware']));
                         } elseif ($name === 'controller') {
                             $context['controller'] = $this->classValue($cursor->args[0]->value ?? null) ?? $context['controller'];
+                        } elseif ($name === 'name') {
+                            $context['name'] = ($this->stringValue($cursor->args[0]->value ?? null) ?? '') . $context['name'];
                         }
                     }
 
@@ -193,11 +221,11 @@ final class LaravelRouteScanner
             }
 
             /**
-             * @return array{prefix: string, middleware: list<string>, controller: string|null}
+             * @return array{prefix: string, middleware: list<string>, controller: string|null, name: string}
              */
             private function currentContext(): array
             {
-                $context = ['prefix' => $this->basePrefix, 'middleware' => [], 'controller' => null];
+                $context = ['prefix' => $this->basePrefix, 'middleware' => [], 'controller' => null, 'name' => ''];
                 foreach ($this->groups as $group) {
                     $context = $this->mergeContext($context, $group);
                 }
@@ -206,9 +234,9 @@ final class LaravelRouteScanner
             }
 
             /**
-             * @param array{prefix: string, middleware: list<string>, controller: string|null} $base
-             * @param array{prefix: string, middleware: list<string>, controller: string|null} $next
-             * @return array{prefix: string, middleware: list<string>, controller: string|null}
+             * @param array{prefix: string, middleware: list<string>, controller: string|null, name: string} $base
+             * @param array{prefix: string, middleware: list<string>, controller: string|null, name: string} $next
+             * @return array{prefix: string, middleware: list<string>, controller: string|null, name: string}
              */
             private function mergeContext(array $base, array $next): array
             {
@@ -216,6 +244,7 @@ final class LaravelRouteScanner
                     'prefix' => $this->joinUri($base['prefix'], $next['prefix']),
                     'middleware' => array_values(array_merge($base['middleware'], $next['middleware'])),
                     'controller' => $next['controller'] ?? $base['controller'],
+                    'name' => $base['name'] . $next['name'],
                 ];
             }
 
@@ -223,8 +252,43 @@ final class LaravelRouteScanner
             {
                 return match ($method) {
                     'resource', 'apiResource' => 'RESOURCE',
+                    'match' => 'MATCH',
                     default => strtoupper($method),
                 };
+            }
+
+            /**
+             * @param array{prefix: string, middleware: list<string>, controller: string|null, name: string} $context
+             * @return list<array<string, mixed>>
+             */
+            private function resourceRoutes(array $context, string $uri, ?string $controller, bool $api): array
+            {
+                $actions = [
+                    ['GET', $uri, 'index'],
+                    ['POST', $uri, 'store'],
+                    ['GET', $uri . '/{id}', 'show'],
+                    ['PUT|PATCH', $uri . '/{id}', 'update'],
+                    ['DELETE', $uri . '/{id}', 'destroy'],
+                ];
+                if (!$api) {
+                    array_splice($actions, 2, 0, [['GET', $uri . '/create', 'create']]);
+                    array_splice($actions, -1, 0, [['GET', $uri . '/{id}/edit', 'edit']]);
+                }
+
+                $routes = [];
+                foreach ($actions as [$httpMethod, $path, $action]) {
+                    $routes[] = [
+                        'http_method' => $httpMethod,
+                        'uri' => $this->joinUri($context['prefix'], $path),
+                        'name' => $context['name'],
+                        'middleware' => $context['middleware'],
+                        'controller' => $controller,
+                        'controller_method' => $controller ? $controller . '::' . $action : null,
+                        'source_file' => PathNormalizer::relative($this->file, $this->projectPath),
+                    ];
+                }
+
+                return $routes;
             }
 
             private function joinUri(string $prefix, string $uri): string
@@ -247,6 +311,31 @@ final class LaravelRouteScanner
                 }
 
                 return $this->stringValue($node);
+            }
+
+            private function includePath(?Node $node): ?string
+            {
+                if ($node instanceof Node\Scalar\String_) {
+                    return $this->absolutePath($node->value);
+                }
+
+                if ($node instanceof Node\Expr\FuncCall && $node->name instanceof Node\Name && in_array($node->name->toString(), ['base_path', 'resource_path'], true)) {
+                    $path = $this->stringValue($node->args[0]->value ?? null);
+                    if ($path !== null) {
+                        return $this->absolutePath($path);
+                    }
+                }
+
+                return null;
+            }
+
+            private function absolutePath(string $path): string
+            {
+                if (str_starts_with($path, '/')) {
+                    return $path;
+                }
+
+                return rtrim($this->projectPath, '/') . '/' . ltrim($path, '/');
             }
 
             /**
@@ -278,7 +367,14 @@ final class LaravelRouteScanner
         $traverser->addVisitor($visitor);
         $traverser->traverse($ast);
 
-        return $visitor->routes;
+        $routes = $visitor->routes;
+        foreach (array_unique($visitor->includes) as $include) {
+            if (is_file($include)) {
+                $routes = array_merge($routes, $this->scanFileWithIncludes($include, $projectPath, $seen));
+            }
+        }
+
+        return $routes;
     }
 
     /**
