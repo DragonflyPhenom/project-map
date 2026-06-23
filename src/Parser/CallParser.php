@@ -102,7 +102,7 @@ final class CallParser
             'source_method' => $sourceMethod,
             'kind' => $class ? 'new' : 'unknown_call',
             'target_class' => $class,
-            'target_method' => null,
+            'target_method' => $class ? $class . '::__construct' : null,
             'method' => '__construct',
         ];
     }

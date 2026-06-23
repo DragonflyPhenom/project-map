@@ -8,6 +8,7 @@ use IaroslavKhmel\ProjectMap\Config\ScanConfig;
 use IaroslavKhmel\ProjectMap\Output\DotWriter;
 use IaroslavKhmel\ProjectMap\Output\HtmlWriter;
 use IaroslavKhmel\ProjectMap\Output\JsonWriter;
+use IaroslavKhmel\ProjectMap\Output\MermaidRenderer;
 use IaroslavKhmel\ProjectMap\Scanner\ProjectScanner;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -22,6 +23,7 @@ final class ScanCommand extends Command
     public function __construct(
         private readonly ProjectScanner $scanner = new ProjectScanner(),
         private readonly JsonWriter $jsonWriter = new JsonWriter(),
+        private readonly MermaidRenderer $mermaidRenderer = new MermaidRenderer(),
         private readonly DotWriter $dotWriter = new DotWriter(),
         private readonly HtmlWriter $htmlWriter = new HtmlWriter(),
     ) {
@@ -34,7 +36,7 @@ final class ScanCommand extends Command
             ->setName('scan')
             ->addOption('path', null, InputOption::VALUE_REQUIRED, 'Project path', '.')
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory', '.project-map')
-            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Comma-separated formats: json,dot,html', 'json,dot')
+            ->addOption('format', null, InputOption::VALUE_REQUIRED, 'Comma-separated formats: json,mmd,html,dot', 'json,mmd,html')
             ->addOption('framework', null, InputOption::VALUE_REQUIRED, 'auto, laravel, symfony or generic', 'auto')
             ->addOption('exclude', null, InputOption::VALUE_REQUIRED, 'Comma-separated excluded directories', 'vendor,node_modules,storage,bootstrap/cache,var/cache');
     }
@@ -57,10 +59,15 @@ final class ScanCommand extends Command
 
         $result = $this->scanner->scan($config);
         $payload = $result['graph']->toArray($config->projectPath, $result['framework']->value);
+        $mermaid = $this->mermaidRenderer->render($result['graph']);
         $written = [];
 
         if (in_array('json', $config->formats, true)) {
             $written[] = $this->jsonWriter->write($payload, $config->outputPath);
+        }
+
+        if (in_array('mmd', $config->formats, true) || in_array('mermaid', $config->formats, true)) {
+            $written[] = $this->mermaidRenderer->write($result['graph'], $config->outputPath);
         }
 
         if (in_array('dot', $config->formats, true)) {
@@ -68,7 +75,7 @@ final class ScanCommand extends Command
         }
 
         if (in_array('html', $config->formats, true)) {
-            $written[] = $this->htmlWriter->write($payload, $config->outputPath);
+            $written[] = $this->htmlWriter->write($payload, $config->outputPath, $mermaid);
         }
 
         $output->writeln('<info>Project map generated.</info>');

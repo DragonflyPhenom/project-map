@@ -15,7 +15,7 @@ final readonly class ScanConfig
     public function __construct(
         public string $projectPath,
         public string $outputPath,
-        public array $formats = ['json', 'dot'],
+        public array $formats = ['json', 'mmd', 'html'],
         public FrameworkType $framework = FrameworkType::Auto,
         public array $exclude = ['vendor', 'node_modules', 'storage', 'bootstrap/cache', 'var/cache'],
     ) {

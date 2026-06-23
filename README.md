@@ -45,7 +45,7 @@ vendor/bin/project-map scan
 vendor/bin/project-map scan \
   --path=. \
   --output=storage/project-map \
-  --format=json,dot,html \
+  --format=json,mmd,html \
   --framework=auto \
   --exclude=vendor,node_modules,storage,bootstrap/cache,var/cache
 ```
@@ -54,35 +54,41 @@ Options:
 
 - `--path` project path, defaults to current directory
 - `--output` output directory, defaults to `.project-map`
-- `--format` comma-separated formats: `json`, `dot`, `html`
+- `--format` comma-separated formats: `json`, `mmd`, `html`, `dot`
 - `--framework` one of `auto`, `laravel`, `symfony`, `generic`
 - `--exclude` comma-separated directories to skip; `vendor` is always excluded
 
 ## Output
 
-The JSON file is written to:
+The JSON graph payload is written to:
 
 ```text
 .project-map/project-map.json
 ```
 
-The DOT graph is written to:
+The Mermaid graph is written to:
 
 ```text
-.project-map/project-map.dot
+.project-map/project-map.mmd
 ```
 
-The optional HTML report is written to:
+The HTML report renders the Mermaid graph as the main project map and is written to:
 
 ```text
 .project-map/index.html
 ```
 
+DOT remains available as an optional extra format:
+
+```text
+.project-map/project-map.dot
+```
+
 ## Current MVP
 
-Generic PHP scanning includes namespaces, class-like declarations, inheritance, interfaces, traits, method signatures, visibility, parameters, return types, method calls, static calls and object creation. Dynamic calls that cannot be resolved are stored as `unknown_call`.
+Generic PHP scanning includes namespaces, class-like declarations, inheritance, interfaces, traits, method signatures, visibility, parameters, return types, method calls, static calls and object creation. Dynamic calls that cannot be resolved are stored as `unknown_call` warnings.
 
-Laravel support includes static AST parsing of `Route::get/post/put/patch/delete/resource/apiResource`, Eloquent models, table names, fillable/guarded/casts/hidden/appends, relations and best-effort migration fields.
+Laravel support includes recursive AST parsing of `routes/`, route groups with prefix/middleware/controller context, `Route::get/post/put/patch/delete/resource/apiResource`, Eloquent models, table names, fillable/guarded/casts/hidden/appends, relations and best-effort migration fields.
 
 Symfony support includes attribute routes and Doctrine entity attributes. YAML route parsing is reported as an MVP warning instead of failing.
 
