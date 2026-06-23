@@ -1,0 +1,14 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use IaroslavKhmel\ProjectMap\Console\ScanCommand;
+use Symfony\Component\Console\Application;
+
+require __DIR__ . '/../vendor/autoload.php';
+
+$application = new Application('project-map');
+$application->add(new ScanCommand());
+$application->setDefaultCommand('scan', false);
+$application->run();
