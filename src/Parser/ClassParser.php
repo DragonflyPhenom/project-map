@@ -66,7 +66,9 @@ final class ClassParser
             public function enterNode(Node $node)
             {
                 if ($node instanceof Node\Stmt\Class_ || $node instanceof Node\Stmt\Interface_ || $node instanceof Node\Stmt\Trait_ || $node instanceof Node\Stmt\Enum_) {
-                    $this->enterClassLike($node);
+                    if ($this->enterClassLike($node)) {
+                        $node->setAttribute('project_map_entered_class_like', true);
+                    }
                 }
 
                 return null;
@@ -75,6 +77,10 @@ final class ClassParser
             public function leaveNode(Node $node)
             {
                 if ($node instanceof Node\Stmt\Class_ || $node instanceof Node\Stmt\Interface_ || $node instanceof Node\Stmt\Trait_ || $node instanceof Node\Stmt\Enum_) {
+                    if ($node->getAttribute('project_map_entered_class_like') !== true) {
+                        return null;
+                    }
+
                     $class = array_pop($this->classes);
                     $class['methods'] = $this->currentClassMethods;
                     $this->classes[] = $class;
@@ -86,11 +92,11 @@ final class ClassParser
                 return null;
             }
 
-            private function enterClassLike(Node $node): void
+            private function enterClassLike(Node $node): bool
             {
                 $name = $node->namespacedName ?? $node->name ?? null;
                 if (!$name instanceof Node\Name && !$name instanceof Node\Identifier) {
-                    return;
+                    return false;
                 }
 
                 $className = $name->toString();
@@ -124,6 +130,8 @@ final class ClassParser
                     'methods' => $methods,
                     'file' => PathNormalizer::relative($this->file, $this->projectPath),
                 ];
+
+                return true;
             }
 
             private function type(Node $node): string

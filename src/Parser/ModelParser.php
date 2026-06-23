@@ -155,7 +155,7 @@ final class ModelParser
                             'method' => $stmt->name->toString(),
                             'type' => $call->name->toString(),
                             'target_model' => $this->firstClassArgument($call),
-                            'foreign_key' => $call->args[1]->value instanceof Node\Scalar\String_ ? $call->args[1]->value->value : null,
+                            'foreign_key' => $this->stringArgument($call, 1),
                         ];
                     }
                 }
@@ -175,6 +175,13 @@ final class ModelParser
                 }
 
                 return null;
+            }
+
+            private function stringArgument(Node\Expr\MethodCall $call, int $index): ?string
+            {
+                $arg = $call->args[$index]->value ?? null;
+
+                return $arg instanceof Node\Scalar\String_ ? $arg->value : null;
             }
 
             /**

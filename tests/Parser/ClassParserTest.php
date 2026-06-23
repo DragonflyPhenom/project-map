@@ -52,4 +52,36 @@ PHP);
         self::assertContains('new', array_column($result['calls'], 'kind'));
         self::assertContains('App\Service\UserService::create', array_column($result['calls'], 'target_method'));
     }
+
+    public function testItIgnoresAnonymousClassesWithoutCorruptingNamedClasses(): void
+    {
+        $dir = sys_get_temp_dir() . '/project-map-test-' . uniqid();
+        mkdir($dir);
+        $file = $dir . '/Factory.php';
+        file_put_contents($file, <<<'PHP'
+<?php
+
+namespace App;
+
+final class Factory
+{
+    public function make(): object
+    {
+        return new class {
+            public function run(): void
+            {
+            }
+        };
+    }
+}
+PHP);
+
+        $result = (new ClassParser())->parseFile($file, $dir);
+
+        self::assertCount(1, $result['classes']);
+        self::assertSame('App\Factory', $result['classes'][0]['name']);
+        foreach ($result['classes'] as $class) {
+            self::assertArrayHasKey('name', $class);
+        }
+    }
 }

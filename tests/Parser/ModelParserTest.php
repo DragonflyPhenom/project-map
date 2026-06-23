@@ -45,6 +45,43 @@ PHP);
         self::assertSame('App\Models\User', $models[0]['relations'][0]['target_model']);
     }
 
+    public function testItParsesLaravelRelationsWithOptionalArguments(): void
+    {
+        $dir = sys_get_temp_dir() . '/project-map-model-' . uniqid();
+        mkdir($dir);
+        $file = $dir . '/Post.php';
+        file_put_contents($file, <<<'PHP'
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+final class Post extends Model
+{
+    public function comments()
+    {
+        return $this->hasMany(Comment::class);
+    }
+
+    public function commentable()
+    {
+        return $this->morphTo();
+    }
+}
+PHP);
+
+        $models = (new ModelParser())->parseLaravelFile($file);
+
+        self::assertCount(1, $models);
+        self::assertSame('hasMany', $models[0]['relations'][0]['type']);
+        self::assertSame('App\Models\Comment', $models[0]['relations'][0]['target_model']);
+        self::assertNull($models[0]['relations'][0]['foreign_key']);
+        self::assertSame('morphTo', $models[0]['relations'][1]['type']);
+        self::assertNull($models[0]['relations'][1]['target_model']);
+        self::assertNull($models[0]['relations'][1]['foreign_key']);
+    }
+
     public function testItParsesDoctrineEntities(): void
     {
         $dir = sys_get_temp_dir() . '/project-map-doctrine-' . uniqid();
